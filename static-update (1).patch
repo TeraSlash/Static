@@ -1,0 +1,28 @@
+diff -ruN a/lua/autorun/client/cl_cdeath.lua b/lua/autorun/client/cl_cdeath.lua
+--- a/lua/autorun/client/cl_cdeath.lua	2026-11-23 03:34:07.306544964 +0000
++++ b/lua/autorun/client/cl_cdeath.lua	2026-11-23 03:34:07.308619365 +0000
+@@ -18,8 +18,8 @@
+ local DOUBLE_CLICK_WINDOW = 0.5
+ 
+ -- Static death: you keep looking through your dead body's eyes while the picture dissolves into static.
+-local STATIC_DELAY = 0.8        -- seconds of normal vision before the picture starts to break up
+-local STATIC_RAMP_TIME = 6      -- seconds it then takes to become pure static (headshots skip all of this)
++local STATIC_DELAY = 0.1        -- seconds of normal vision before the picture starts to break up
++local STATIC_RAMP_TIME = 2.5      -- seconds it then takes to become pure static (headshots skip all of this)
+ local STATIC_MAX_VOLUME = 0.9
+ local STATIC_MIN_VOLUME = 0.2   -- how loud the noise already is when it starts creeping in
+ 
+diff -ruN a/lua/homigrad/hud/cl_weapon_selector.lua b/lua/homigrad/hud/cl_weapon_selector.lua
+--- a/lua/homigrad/hud/cl_weapon_selector.lua	2026-11-23 03:34:07.305520591 +0000
++++ b/lua/homigrad/hud/cl_weapon_selector.lua	2026-11-23 03:34:07.307567267 +0000
+@@ -23,8 +23,8 @@
+ -- Weapon wheel (bottom right corner): three icons on a small arc, no background.
+ -- The selected weapon sits up-left of the corner, the next one above it and the previous one below it.
+ -- Sizes are fractions of the screen height.
+-local WHEEL_RING = 0.165           -- distance of the icons from the corner pivot
+-local WHEEL_ICON_W = 0.145        -- width of the selected icon
++local WHEEL_RING = 0.115           -- distance of the icons from the corner pivot
++local WHEEL_ICON_W = 0.10        -- width of the selected icon
+ local WHEEL_INSET = -0.25           -- pivot sits this far past the corner (x ring), which pushes the two side icons partly off screen
+ local WHEEL_SHADOW_ALPHA = 150    -- darkness of the soft shadow behind the icons (0 = none)
+ local WHEEL_SELECT_ANGLE = 225     -- screen angle of the selected weapon (225 = up-left)
