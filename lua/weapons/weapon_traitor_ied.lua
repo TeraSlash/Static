@@ -593,7 +593,11 @@ function SWEP:SecondaryAttack(calledFrom)
 
 			local bomb = ents.Create("prop_physics")
 			bomb:SetModel("models/props_junk/cardboard_jox004a.mdl")
-			bomb:SetPos(Tr.HitPos + Tr.HitNormal * 4)
+			local hitPos = Tr and Tr.HitPos
+			local hitNormal = Tr and Tr.HitNormal
+			if not isvector(hitPos) then hitPos = IsValid(Owner) and (Owner:GetPos() + Owner:GetAimVector() * 30) or self:GetPos() end
+			if not isvector(hitNormal) then hitNormal = vector_up end
+			bomb:SetPos(hitPos + hitNormal * 4)
 			bomb:SetModelScale(0.4)
 			bomb:Spawn()
 			bomb:Activate()
