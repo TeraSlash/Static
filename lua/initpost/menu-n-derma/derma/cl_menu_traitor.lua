@@ -20,14 +20,14 @@ local TRAITOR_PREVIEW_START_OFFSET = 80
 
 local function CreateTraitorMenuFonts()
     surface.CreateFont(TRAITOR_MENU_FONT, {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = ScreenScale(10),
         weight = 400,
         antialias = true
     })
 
     surface.CreateFont(TRAITOR_POINTS_FONT, {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = ScreenScale(12),
         weight = 400,
         antialias = true
@@ -53,14 +53,7 @@ local SOUND_TYPEWRITER_PITCH = 102
 local SOUND_SETTINGS_CLICK = "ui/rem_click.wav"
 local SOUND_MENU_SELECT = "ui/rem_select.wav"
 
-local function PlayTypewriterSound()
-    local ply = LocalPlayer()
-    if IsValid(ply) then
-        ply:EmitSound(SOUND_TYPEWRITER, SOUND_TYPEWRITER_LEVEL, SOUND_TYPEWRITER_PITCH, SOUND_TYPEWRITER_VOLUME)
-        return
-    end
-    surface.PlaySound(SOUND_TYPEWRITER)
-end
+local function PlayTypewriterSound() end
 
 local function SetupAnimatedLabel(lbl, text, delay, charSpeed)
     lbl:SetText(string.rep("#", #text))
@@ -118,7 +111,7 @@ local function PaintAnimatedLabel(self, w, h)
     local outlineColor = Color(0, 0, 0, 255)
 
     if isHovered then
-        local v = flash * 255
+        local v = 175 + flash * 80
         textColor = Color(v, v, v, 255)
         local inv = 255 - v
         outlineColor = Color(inv, inv, inv, 255)
@@ -131,7 +124,7 @@ local function PaintAnimatedLabel(self, w, h)
     matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
     matrix:Scale(Vector(scale, scale, 1))
     cam.PushModelMatrix(matrix)
-    draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+    draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
     if self.LineLerp and self.LineLerp > 0.01 then
         surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
         surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -687,7 +680,7 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
     sidebarHeaderTitle.TargetText = config.title
     function sidebarHeaderTitle:Think()
         local elapsed = CurTime() - (self.OpenTime or CurTime())
-        local charsToShow = math.floor(elapsed * 18)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = self.TargetText or ""
         local len = #target
         if charsToShow > len then charsToShow = len end
@@ -1293,7 +1286,7 @@ function hg.DrawLoadoutMenu(parentPanel)
     header.TargetText = "LOADOUT"
     function header:Think()
         local elapsed = CurTime() - (self.OpenTime or CurTime())
-        local charsToShow = math.floor(elapsed * 18)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = self.TargetText or ""
         local len = #target
         if charsToShow > len then charsToShow = len end
