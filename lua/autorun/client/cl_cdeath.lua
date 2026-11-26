@@ -144,30 +144,55 @@ local nextCamSync         = 0
 local nextSoundfade       = 0
 
 
-local zcity_RenderScene = nil
-local zcity_CalcView = nil
+-- Filled in by the "video-style death" section at the end of this file (the camera lives in the body's eyes).
+local GetRagdollEyeView, HideRagdollHead
 
-local function TakeAuthority()
-    local hooks = hook.GetTable()
-    if hooks["RenderScene"] and hooks["RenderScene"]["jopa"] then
-        zcity_RenderScene = hooks["RenderScene"]["jopa"]
-        hook.Remove("RenderScene", "jopa")
+-- the corpse that belongs to us
+local function FindDeathRagdoll(ply)
+    local rag = ply:GetNWEntity("RagdollDeath")
+    if IsValid(rag) then return rag end
+    rag = ply:GetRagdollEntity()
+    if IsValid(rag) then return rag end
+    rag = ply:GetNWEntity("FakeRagdoll")
+    if IsValid(rag) then return rag end
+end
+
+-- While you are dead nothing but this file may decide what the camera shows. The gamemode's own view and other
+-- addons (ActMod compatibility ...) also hook RenderScene / CalcView, and some of them win against ours, so every
+-- other hook on those two events is parked until you respawn.
+local takenHooks = {}
+local authorityTaken = false
+
+local function TakeHookEvent(event, keepName)
+    local tbl = hook.GetTable()[event]
+    if not tbl then return end
+
+    local names = {}
+    for name in pairs(tbl) do
+        if name ~= keepName then names[#names + 1] = name end
     end
-    if hooks["CalcView"] and hooks["CalcView"]["homigrad-view"] then
-        zcity_CalcView = hooks["CalcView"]["homigrad-view"]
-        hook.Remove("CalcView", "homigrad-view")
+
+    takenHooks[event] = takenHooks[event] or {}
+    for _, name in ipairs(names) do
+        takenHooks[event][name] = tbl[name]
+        hook.Remove(event, name)
     end
 end
 
+local function TakeAuthority()
+    authorityTaken = true
+    TakeHookEvent("RenderScene", "CinematicDeathRenderScene")
+    TakeHookEvent("CalcView", "CinematicDeathCamera")
+end
+
 local function ReleaseAuthority()
-    if zcity_RenderScene then
-        hook.Add("RenderScene", "jopa", zcity_RenderScene)
-        zcity_RenderScene = nil
+    authorityTaken = false
+    for event, parked in pairs(takenHooks) do
+        for name, fn in pairs(parked) do
+            hook.Add(event, name, fn)
+        end
     end
-    if zcity_CalcView then
-        hook.Add("CalcView", "homigrad-view", zcity_CalcView)
-        zcity_CalcView = nil
-    end
+    takenHooks = {}
 end
 
 local function DeathEffectRoundActive()
@@ -183,7 +208,8 @@ local function DeathScreenEnabled()
 end
 
 local function RealishDeathEffect()
-    return cfg_realish or zb and zb.CROUND == "realish"
+    -- the video-style death plays in every mode, realish included
+    return false
 end
 
 cvars.AddChangeCallback("deatheffect_death_screen", function(_, _, newValue)
@@ -240,9 +266,7 @@ end
 local function InitDeathSequence(ply)
     if isDead then return end
     isDead           = true
-    if DeathScreenEnabled() and not RealishDeathEffect() then
-        TakeAuthority()
-    end
+    TakeAuthority()
     stage2Started    = false
     keepSoundAlive   = true
     inTransition     = false
@@ -252,7 +276,7 @@ local function InitDeathSequence(ply)
     compatActiveTime = 0
     compatTriggered  = false
     deathTime        = CurTime()
-    ragdollEnt       = ply:GetRagdollEntity()
+    ragdollEnt       = FindDeathRagdoll(ply)
     prevReloadDown   = false
     prevJumpDown     = false
     prevSpecReloadDown = false
@@ -462,7 +486,7 @@ local function CinematicDeathTracker()
     end
 
     if isDead and not IsValid(ragdollEnt) then
-        ragdollEnt = ply:GetRagdollEntity()
+        ragdollEnt = FindDeathRagdoll(ply)
         if not IsValid(ragdollEnt) then
             local bestDist = math.huge
             for _, ent in ipairs(ents.FindByClass("prop_ragdoll")) do
@@ -550,10 +574,15 @@ hook.Add("CreateMove", "CinematicDeathFreecamLook", CinematicDeathFreecamLook)
 
 
 local function BuildDeathView(fov)
-    if not DeathScreenEnabled() then return end
     if RealishDeathEffect() then return end
 
-    if compatActive then 
+    -- (compat mode and the death itself: you keep looking out of the body when it is there)
+    if compatActive then
+        local eyePos, eyeAng = GetRagdollEyeView()
+        if eyePos then
+            HideRagdollHead(ragdollEnt)
+            return { origin = eyePos, angles = eyeAng, fov = fov, znear = 1, drawviewer = false }
+        end
         return {
             origin     = LocalPlayer():EyePos(),
             angles     = LocalPlayer():EyeAngles(),
@@ -580,39 +609,16 @@ local function BuildDeathView(fov)
         return { origin = freecamPos, angles = freecamAng, fov = fov, drawviewer = false }
     end
 
-    local elapsed = CurTime() - deathTime
-    local view = { origin = deathCamPos, fov = fov, drawviewer = false }
-
-    if elapsed < STAGE_1_DURATION then
-        local intensity = (1 - (elapsed / STAGE_1_DURATION)) * 15
-        view.angles = deathCamAng + Angle(
-            math.sin(CurTime() * 30) * intensity,
-            math.cos(CurTime() * 35) * intensity,
-            math.sin(CurTime() * 40) * intensity
-        )
-    else
-        if IsValid(ragdollEnt) then
-            local targetPos = ragdollEnt:GetPos() + Vector(0, 0, 15)
-            local targetAng = (targetPos - deathCamPos):Angle()
-            deathCamAng = LerpAngle(FrameTime() * 4, deathCamAng, targetAng)
-
-            local dist = deathCamPos:Distance(targetPos)
-            if dist > 0 then
-                local dir    = (targetPos - deathCamPos):GetNormalized()
-                local maxDist = cv_cam_max_dist and cv_cam_max_dist:GetFloat() or 150
-                local minDist = cv_cam_min_dist and cv_cam_min_dist:GetFloat() or 40
-                if dist > maxDist then
-                    deathCamPos = LerpVector(FrameTime() * 2, deathCamPos, targetPos - dir * maxDist)
-                elseif dist < minDist then
-                    deathCamPos = LerpVector(FrameTime() * 2, deathCamPos, targetPos - dir * minDist)
-                end
-            end
-        end
-        view.origin = deathCamPos
-        view.angles = deathCamAng
+    -- stay attached to the limp body: see what the corpse sees
+    local eyePos, eyeAng = GetRagdollEyeView()
+    if eyePos then
+        HideRagdollHead(ragdollEnt)
+        return { origin = eyePos, angles = eyeAng, fov = fov, znear = 1, drawviewer = false }
     end
 
-    return view
+    -- the ragdoll has not shown up yet: stay exactly where the player was looking
+    local ply = LocalPlayer()
+    return { origin = ply:EyePos(), angles = ply:EyeAngles(), fov = fov, drawviewer = false }
 end
 
 
@@ -669,58 +675,6 @@ local function CinematicDeathBackground()
         return
     end
 
-    if elapsed >= STAGE_1_DURATION then
-        local stageElapsed = elapsed - STAGE_1_DURATION
-        local realish = RealishDeathEffect()
-        local fadeDuration = realish and REALISH_BLACK_FADE_DURATION or BLACK_FADE_DURATION
-        local fadeOutDuration = realish and REALISH_BLACK_FADE_OUT_DURATION or BLACK_FADE_OUT_DURATION
-        local fadeProgress = math.Clamp(stageElapsed / fadeDuration, 0, 1)
-        local fadeOutProgress = math.Clamp((stageElapsed - fadeDuration) / fadeOutDuration, 0, 1)
-		local overlayAlpha = realish and math.floor((fadeOutProgress > 0 and 1 - fadeOutProgress or fadeProgress) * 255) or math.floor((1 - fadeOutProgress) * 255)
-        local red = realish and 0 or math.floor((1 - fadeProgress) * 255)
-        surface.SetDrawColor(red, 0, 0, overlayAlpha)
-        surface.DrawRect(0, 0, sw, sh)
-
-        if realish then return end
-
-        if not DeathScreenEnabled() then
-            local textFadeIn = math.Clamp(stageElapsed / DEATH_TEXT_FADE_IN, 0, 1)
-            local textAlpha = math.floor(textFadeIn * overlayAlpha * (1 - fadeProgress))
-            local text = "Deceased."
-            local desc = "You are no longer a witness to the world."
-            draw.SimpleText(text, "DeathEffect_HG_Large", sw / 2, sh / 2 - 40, Color(0, 0, 0, textAlpha), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-            draw.SimpleText(desc, "DeathEffect_HG_Desc", sw / 2, sh / 2 + 45, Color(0, 0, 0, textAlpha), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-            return
-        end
-
-        if fadeProgress < 1 and IsValid(ragdollEnt) then
-            cam.Start3D(deathCamPos, deathCamAng)
-                cam.IgnoreZ(true)
-                render.SuppressEngineLighting(true)
-                render.MaterialOverride(matWhite)
-                render.SetColorModulation(0, 0, 0)
-                render.SetBlend(1)
-                ragdollEnt:DrawModel()
-                render.SetBlend(1)
-                render.SetColorModulation(1, 1, 1)
-                render.MaterialOverride(nil)
-                render.SuppressEngineLighting(false)
-                cam.IgnoreZ(false)
-            cam.End3D()
-        end
-
-        local textFadeIn = math.Clamp(stageElapsed / DEATH_TEXT_FADE_IN, 0, 1)
-        local textAlpha = math.floor(textFadeIn * overlayAlpha * (1 - fadeProgress))
-        local shake = 5 * (1 - textFadeIn)
-        local text = "Deceased."
-        local desc = "You are no longer a witness to the world."
-        local slide = 1 - ((1 - textFadeIn) ^ 3)
-        local textX = Lerp(slide, -650, 70) + math.sin(CurTime() * 95) * shake
-        local textY = sh / 2 - 60 + math.cos(CurTime() * 110) * shake
-        draw.SimpleText(text, "DeathEffect_HG_Large", textX, textY, Color(0, 0, 0, textAlpha), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-        draw.SimpleText(desc, "DeathEffect_HG_Desc", textX + 6, textY + 85, Color(0, 0, 0, textAlpha), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-    end
-
 end
 hook.Add("DrawOverlay", "CinematicDeathBackground", CinematicDeathBackground)
 
@@ -744,6 +698,7 @@ local function CinematicDeathRenderScene(pos, angle, fov)
     deathRenderView.w          = ScrW()
     deathRenderView.h          = ScrH()
     deathRenderView.fov        = view.fov or fov
+    deathRenderView.znear      = view.znear or 1
     deathRenderView.origin     = view.origin
     deathRenderView.angles     = view.angles
     deathRenderView.drawviewer = view.drawviewer
@@ -755,3 +710,518 @@ local function CinematicDeathRenderScene(pos, angle, fov)
     return true
 end
 hook.Add("RenderScene", "CinematicDeathRenderScene", CinematicDeathRenderScene)
+
+
+
+-- =============================================================================================
+-- VIDEO-STYLE DEATH
+-- =============================================================================================
+-- Every death looks like the reference video:
+--   0.0 - 1.0s   you look out of the body, the colour drains to grey
+--   0.8 - 1.2s   the edges close in and the picture goes black
+--   1.2 - 1.6s   pure black
+--   1.6s on      the static fades in out of the black (2s) - and a noise fades in with it
+-- Headshot / explosion / killbrick (flagged by sv_cdeath.lua): BLACK AT ONCE, then the static fades in.
+-- Console: deathstatic_test (normal death) / deathstatic_test 1 (instant death) previews it for 10 seconds,
+--          deathstatic_debug 1 prints the state once per second.
+-- Settings > Gameplay: "Death static" (on/off: off = only the camera in the body) and "Death static loudness (%)".
+
+local DEATH_GREY_TIME   = 1.0   -- seconds for the colour to drain completely
+local DEATH_DARK_START  = 0.8   -- when the picture starts to close in
+local DEATH_DARK_TIME   = 0.4   -- how long it takes to go fully black
+local DEATH_BLACK_HOLD  = 0.4   -- seconds of pure black before the static starts
+local STATIC_FADE_TIME  = 2.0   -- seconds the static takes to fade in out of the black
+local STATIC_MIN_VOLUME = 0.0   -- loudness when the static first starts
+local STATIC_MAX_VOLUME = 1.0   -- loudness at full static (before the slider)
+
+local cv_death_static  = CreateClientConVar("hg_death_static", "1", true, false, "Fade to static when you die", 0, 1)
+local cv_static_volume = CreateClientConVar("hg_death_static_volume", "100", true, false, "Loudness of the death static noise, in percent (0 - 120)", 0, 120)
+local cv_static_debug  = CreateClientConVar("deathstatic_debug", "0", true, false, "print the state of the static death once per second")
+
+-- state
+local ownDeathStart, ownHasLived = 0, false   -- the local player's own death (does not wait for the tracker above)
+local instantStart = 0                        -- when the instant-death flag first showed up (0 = not an instant death)
+local testUntil, testStart, testInstant = 0, 0, false
+local eyePosSmooth, eyeAngSmooth = nil, nil
+local headHiddenEnt, headHiddenBone, headHiddenPrev = nil, nil, nil
+local staticStation, staticLoading = nil, false
+
+-- ---- the camera in the body -------------------------------------------------------------
+-- (smoothed so a tumbling ragdoll does not shake the screen apart)
+GetRagdollEyeView = function()
+    if not IsValid(ragdollEnt) then return end
+
+    local pos, ang
+    local attID = ragdollEnt:LookupAttachment("eyes")
+    if attID and attID > 0 then
+        local att = ragdollEnt:GetAttachment(attID)
+        if att then pos, ang = att.Pos, att.Ang end
+    end
+
+    if not pos then
+        local bone = ragdollEnt:LookupBone("ValveBiped.Bip01_Head1")
+        if not bone then return end
+        pos, ang = ragdollEnt:GetBonePosition(bone)
+        if not pos then return end
+    end
+
+    local t = math.min(FrameTime() * 25, 1)
+    eyePosSmooth = eyePosSmooth and LerpVector(t, eyePosSmooth, pos) or pos
+    eyeAngSmooth = eyeAngSmooth and LerpAngle(t, eyeAngSmooth, ang) or ang
+
+    -- spectator mode starts from wherever the corpse was looking
+    deathCamPos = Vector(eyePosSmooth.x, eyePosSmooth.y, eyePosSmooth.z)
+    deathCamAng = Angle(eyeAngSmooth.p, eyeAngSmooth.y, eyeAngSmooth.r)
+
+    return eyePosSmooth, eyeAngSmooth
+end
+
+-- hide the corpse's head while we are inside it
+HideRagdollHead = function(ent)
+    if headHiddenEnt == ent or not IsValid(ent) then return end
+    local bone = ent:LookupBone("ValveBiped.Bip01_Head1")
+    if not bone then return end
+
+    local prev = ent:GetManipulateBoneScale(bone)
+    if prev.x < 0.5 then return end -- already gone (headshot), leave it alone
+
+    headHiddenEnt, headHiddenBone, headHiddenPrev = ent, bone, prev
+    ent:ManipulateBoneScale(bone, Vector(0.01, 0.01, 0.01))
+end
+
+local function RestoreRagdollHead()
+    if IsValid(headHiddenEnt) and headHiddenBone then
+        headHiddenEnt:ManipulateBoneScale(headHiddenBone, headHiddenPrev or Vector(1, 1, 1))
+    end
+    headHiddenEnt, headHiddenBone, headHiddenPrev = nil, nil, nil
+end
+
+-- ---- which kind of death, and how far along it is ---------------------------------------
+-- the server flags a headshot / explosion / killbrick the moment it happens (sv_cdeath.lua)
+local function HeadshotFlagged()
+    local ply = LocalPlayer()
+    if not IsValid(ply) then return false end
+    local flaggedAt = ply:GetNWFloat("DeathEffect_HeadshotTime", 0)
+    return flaggedAt > 0 and (CurTime() - flaggedAt) < 15
+end
+
+local function IsInstantDeath()
+    if testUntil > CurTime() then return testInstant end
+    return instantStart > 0
+end
+
+local function Smooth(x)
+    x = math.Clamp(x, 0, 1)
+    return x * x * (3 - 2 * x)
+end
+
+-- seconds since this death began (the test command has its own clock)
+local function DeathClock()
+    if testUntil > CurTime() then return CurTime() - testStart end
+    if ownDeathStart > 0 then return CurTime() - ownDeathStart end
+    return CurTime() - deathTime
+end
+
+-- 0 = clear picture, 1 = pure static
+local function GetStaticLevel()
+    if IsInstantDeath() then
+        local since = (testUntil > CurTime()) and (CurTime() - testStart) or (CurTime() - instantStart)
+        return Smooth(since / STATIC_FADE_TIME)
+    end
+    local staticStartsAt = DEATH_DARK_START + DEATH_DARK_TIME + DEATH_BLACK_HOLD
+    return Smooth((DeathClock() - staticStartsAt) / STATIC_FADE_TIME)
+end
+
+-- how far the colour has drained (normal deaths)
+local function GetGreyLevel()
+    if IsInstantDeath() then return 0 end
+    return Smooth(DeathClock() / DEATH_GREY_TIME)
+end
+
+-- how far the picture has closed in to black: 0 = not at all, 1 = black
+local function GetDarkLevel()
+    if IsInstantDeath() then return 1 end
+    return Smooth((DeathClock() - DEATH_DARK_START) / DEATH_DARK_TIME)
+end
+
+-- true while the effect is on screen
+local function StaticDeathActive()
+    if testUntil > CurTime() then return true end
+    if not cv_death_static:GetBool() then return false end
+    if HeadshotFlagged() and not inTransition then return true end
+    return (isDead or ownDeathStart > 0) and not inSpectator and not inTransition
+end
+
+-- ---- the noise picture and the noise sound -----------------------------------------------
+-- --- noise picture: a 512x512 texture of random grey pixels, drawn with random offsets every frame ---
+local NOISE_SIZE = 512
+local NOISE_ROWS_PER_FRAME = 32
+local noiseRT, noiseMat
+local noiseRows = 0
+local noiseReady = false
+
+local function FillNoiseChunk()
+    if not noiseRT then
+        local ok = pcall(function()
+            noiseRT = GetRenderTarget("zc_death_static_rt_v1", NOISE_SIZE, NOISE_SIZE)
+            noiseMat = CreateMaterial("zc_death_static_mat_v1", "UnlitGeneric", {
+                ["$basetexture"] = noiseRT:GetName(),
+                ["$vertexalpha"] = 1,
+                ["$vertexcolor"] = 1,
+                ["$nolod"] = 1,
+            })
+        end)
+        if not ok then
+            noiseRT, noiseMat = nil, nil
+            noiseReady = true -- give up on the texture, the coarse fallback is used instead
+            return
+        end
+    end
+
+    render.PushRenderTarget(noiseRT)
+    cam.Start2D()
+        if noiseRows == 0 then
+            render.Clear(0, 0, 0, 255)
+        end
+        for y = noiseRows, math.min(noiseRows + NOISE_ROWS_PER_FRAME - 1, NOISE_SIZE - 1) do
+            for x = 0, NOISE_SIZE - 1 do
+                local v = math.random(0, 255)
+                surface.SetDrawColor(v, v, v, 255)
+                surface.DrawRect(x, y, 1, 1)
+            end
+        end
+    cam.End2D()
+    render.PopRenderTarget()
+
+    noiseRows = noiseRows + NOISE_ROWS_PER_FRAME
+    if noiseRows >= NOISE_SIZE then
+        noiseReady = true
+    end
+end
+
+-- built a few rows per frame at startup so there is no hitch
+hook.Add("PostRender", "DeathStaticFill", function()
+    if noiseReady then
+        hook.Remove("PostRender", "DeathStaticFill")
+        return
+    end
+    FillNoiseChunk()
+end)
+
+local function DrawStatic(level, w, h)
+    local alpha = math.floor(255 * math.min(level * 1.15, 1) ^ 0.9)
+
+    if noiseMat then
+        local scale = math.max(4, w / (NOISE_SIZE * 0.98)) -- screen pixels per noise pixel
+        local spanU = w / (NOISE_SIZE * scale)
+        local spanV = h / (NOISE_SIZE * scale)
+        local u0 = math.Rand(0, 1 - spanU)
+        local v0 = math.Rand(0, 1 - spanV)
+        local u1, v1 = u0 + spanU, v0 + spanV
+        if math.random() < 0.5 then u0, u1 = u1, u0 end
+        if math.random() < 0.5 then v0, v1 = v1, v0 end
+
+        surface.SetMaterial(noiseMat)
+        surface.SetDrawColor(255, 255, 255, alpha)
+        surface.DrawTexturedRectUV(0, 0, w, h, u0, v0, u1, v1)
+
+        -- torn bands that get brighter as the signal dies
+        if level > 0.2 then
+            for _ = 1, 3 do
+                if math.random() < 0.5 then
+                    local bandH = math.random(6, 40) * (h / 1080)
+                    local by = math.random(0, math.max(h - bandH, 1))
+                    local uu = math.Rand(0, 1 - spanU)
+                    surface.SetDrawColor(255, 255, 255, math.min(255, alpha + 60))
+                    surface.DrawTexturedRectUV(0, by, w, bandH, uu, v0, uu + spanU, math.min(v0 + bandH / (NOISE_SIZE * scale), 1))
+                end
+            end
+        end
+    else
+        -- texture not available: coarse random blocks
+        local block = math.max(10, math.ceil(math.sqrt(w * h / 9000)))
+        for y = 0, h, block do
+            for x = 0, w, block do
+                local v = math.random(0, 255)
+                surface.SetDrawColor(v, v, v, alpha)
+                surface.DrawRect(x, y, block, block)
+            end
+        end
+    end
+
+    -- scanlines and a slow rolling dark bar, like an old tube TV
+    surface.SetDrawColor(0, 0, 0, 55 * level)
+    for y = 0, h, 4 do
+        surface.DrawRect(0, y, w, 1)
+    end
+    local rollY = ((CurTime() * 0.35) % 1) * h * 1.3 - h * 0.15
+    surface.SetDrawColor(0, 0, 0, 45 * level)
+    surface.DrawRect(0, rollY, w, h * 0.12)
+end
+
+-- --- noise sound: white noise written to data/ once, then looped ---
+local STATIC_WAV = "zcity_death_static_v2.wav" -- v2: louder noise than the first version
+
+local function WriteString(f, str)
+    for i = 1, #str do
+        f:WriteByte(string.byte(str, i))
+    end
+end
+
+local function EnsureStaticWav()
+    if file.Exists(STATIC_WAV, "DATA") then return true end
+
+    local rate = 22050
+    local samples = rate * 2
+    local dataSize = samples * 2
+
+    local f = file.Open(STATIC_WAV, "wb", "DATA")
+    if not f then return false end
+
+    WriteString(f, "RIFF")
+    f:WriteLong(36 + dataSize)
+    WriteString(f, "WAVE")
+    WriteString(f, "fmt ")
+    f:WriteLong(16)
+    f:WriteShort(1)          -- PCM
+    f:WriteShort(1)          -- mono
+    f:WriteLong(rate)
+    f:WriteLong(rate * 2)
+    f:WriteShort(2)
+    f:WriteShort(16)
+    WriteString(f, "data")
+    f:WriteLong(dataSize)
+    for _ = 1, samples do
+        f:WriteShort(math.random(-30000, 30000))
+    end
+    f:Close()
+
+    return true
+end
+
+local function StopStaticSound()
+    if IsValid(staticStation) then
+        staticStation:Stop()
+    end
+    staticStation = nil
+end
+
+local staticWanted = false -- set every frame from StaticDeathActive()
+local STATIC_SOUND_PATHS = {"sound/static/death_static.wav", "data/" .. STATIC_WAV}
+local staticPathIndex = 1
+
+local function UpdateStaticSound(level)
+    if not IsValid(staticStation) then
+        if staticLoading then return end
+        local path = STATIC_SOUND_PATHS[staticPathIndex]
+        if not path then return end
+        if staticPathIndex == 2 and not EnsureStaticWav() then return end
+
+        staticLoading = true
+        sound.PlayFile(path, "noplay", function(station)
+            staticLoading = false
+            if not IsValid(station) then
+                staticPathIndex = staticPathIndex + 1 -- that file isn't available, try the next one
+                return
+            end
+            if not staticWanted then
+                station:Stop()
+                return
+            end
+            station:EnableLooping(true)
+            station:SetVolume(0)
+            station:Play()
+            staticStation = station
+        end)
+        return
+    end
+
+    -- fades in with the picture; the slider scales the whole thing (up to 120%)
+    local loudness = math.Clamp(cv_static_volume:GetFloat() / 100, 0, 1.2)
+    staticStation:SetVolume(math.Clamp(Lerp(level, STATIC_MIN_VOLUME, STATIC_MAX_VOLUME) * loudness, 0, 1.2))
+    if staticStation:GetState() == GMOD_CHANNEL_STOPPED then
+        staticStation:SetTime(0)
+        staticStation:Play()
+    end
+end
+
+
+-- ---- drawing ---------------------------------------------------------------------------
+-- vignette textures: opaque at the named edge, fading out towards the middle
+local deathGradientL = surface.GetTextureID("vgui/gradient-l")
+local deathGradientR = surface.GetTextureID("vgui/gradient-r")
+local deathGradientU = surface.GetTextureID("vgui/gradient-u")
+local deathGradientD = surface.GetTextureID("vgui/gradient-d")
+
+-- HUDPaint, not DrawOverlay: panels (the esc menu) are drawn after HUDPaint, so the menu sits ON TOP of the death
+-- (HOOK_LOW = last of the HUD hooks, so it still covers the rest of the HUD)
+hook.Add("HUDPaint", "DeathStaticOverlay", function()
+    if not StaticDeathActive() then return end
+
+    local w, h = ScrW(), ScrH()
+    local dark = GetDarkLevel()
+    if dark >= 1 then
+        -- solid black (instant deaths start here); the static brightens out of it
+        surface.SetDrawColor(0, 0, 0, 255)
+        surface.DrawRect(0, 0, w, h)
+    elseif dark > 0 then
+        -- the edges close in towards the middle, then the middle goes out as well
+        surface.SetDrawColor(0, 0, 0, 255)
+        local sideW, sideH = dark * w * 0.6, dark * h * 0.6
+        surface.SetTexture(deathGradientL)
+        surface.DrawTexturedRect(0, 0, sideW, h)
+        surface.SetTexture(deathGradientR)
+        surface.DrawTexturedRect(w - sideW, 0, sideW, h)
+        surface.SetTexture(deathGradientU)
+        surface.DrawTexturedRect(0, 0, w, sideH)
+        surface.SetTexture(deathGradientD)
+        surface.DrawTexturedRect(0, h - sideH, w, sideH)
+        surface.SetDrawColor(0, 0, 0, 255 * math.Clamp((dark - 0.6) / 0.4, 0, 1))
+        surface.DrawRect(0, 0, w, h)
+    end
+
+    local level = GetStaticLevel()
+    if level <= 0 then return end
+    DrawStatic(level, w, h)
+end, HOOK_LOW or 1)
+
+-- the colour drains to grey
+hook.Add("RenderScreenspaceEffects", "DeathStaticColor", function()
+    if not StaticDeathActive() then return end
+    local level = GetGreyLevel()
+    if level <= 0 then return end
+    DrawColorModify({
+        ["$pp_colour_addr"] = 0,
+        ["$pp_colour_addg"] = 0,
+        ["$pp_colour_addb"] = 0,
+        ["$pp_colour_brightness"] = 0,
+        ["$pp_colour_contrast"] = 1 + level * 0.25,
+        ["$pp_colour_colour"] = 1 - level * 0.92,
+        ["$pp_colour_mulr"] = 0,
+        ["$pp_colour_mulg"] = 0,
+        ["$pp_colour_mulb"] = 0,
+    })
+end)
+
+-- ---- guaranteed priority for the camera ----------------------------------------------------
+-- Even with the other hooks parked, something may still answer first. While dead we sit on top of hook.Call.
+local originalHookCall, wrappedHookCall = nil, nil
+
+local function InstallHookCallWrapper()
+    if hook.Call == wrappedHookCall then return end
+
+    originalHookCall = hook.Call
+    wrappedHookCall = function(name, gm, ...)
+        if isDead and (name == "RenderScene" or name == "CalcView") then
+            local ok, result
+            if name == "RenderScene" then
+                ok, result = pcall(CinematicDeathRenderScene, ...)
+            else
+                -- CalcView arguments: ply, origin, angles, fov, znear, zfar
+                local _, _, _, fov = ...
+                ok, result = pcall(BuildDeathView, fov)
+            end
+
+            if ok then
+                if result ~= nil then return result end
+            else
+                ErrorNoHaltWithStack(result)
+            end
+        end
+
+        return originalHookCall(name, gm, ...)
+    end
+    hook.Call = wrappedHookCall
+end
+
+local function RemoveHookCallWrapper()
+    if hook.Call == wrappedHookCall and originalHookCall then
+        hook.Call = originalHookCall
+    end
+end
+
+-- ---- every frame ---------------------------------------------------------------------------
+local nextAuthorityCheck, nextHookCheck, nextDebugPrint, aliveSince = 0, 0, 0, nil
+
+hook.Add("Think", "DeathStaticThink", function()
+    local lp = LocalPlayer()
+    if not IsValid(lp) then return end
+
+    -- the local player's own death: starts when you stop being alive, ends when you respawn
+    if lp:Alive() then
+        ownHasLived = true
+        ownDeathStart = 0
+    elseif ownHasLived and ownDeathStart == 0 then
+        ownDeathStart = CurTime()
+    end
+
+    -- instant death: remember when the flag first showed up (cleared again on respawn)
+    if HeadshotFlagged() then
+        if instantStart == 0 then instantStart = CurTime() end
+    else
+        instantStart = 0
+    end
+
+    staticWanted = StaticDeathActive()
+    if staticWanted then
+        UpdateStaticSound(GetStaticLevel())
+    else
+        StopStaticSound()
+    end
+
+    -- your own hats and glasses would be right in front of the camera (read by RenderAccessories)
+    lp.DeathHideAccessories = isDead or nil
+
+    -- other scripts may re-add their camera hooks while we are dead
+    if authorityTaken and CurTime() > nextAuthorityCheck then
+        nextAuthorityCheck = CurTime() + 0.25
+        TakeAuthority()
+    end
+
+    if isDead then
+        if CurTime() > nextHookCheck then
+            nextHookCheck = CurTime() + 1
+            InstallHookCallWrapper()
+        end
+    else
+        RemoveHookCallWrapper()
+        RestoreRagdollHead()
+    end
+
+    -- safety net: if the death state sticks after you are alive again, end it ourselves
+    if isDead and lp:Alive() then
+        aliveSince = aliveSince or CurTime()
+        if CurTime() - aliveSince > 0.75 then
+            aliveSince = nil
+            isDead = false
+            stage2Started = false
+            inTransition = false
+            inSpectator = false
+            compatActive = false
+            ReleaseAuthority()
+            RemoveHookCallWrapper()
+            RestoreRagdollHead()
+            StopStaticSound()
+            if IsValid(ragdollEnt) then ragdollEnt:SetNoDraw(false) end
+            ragdollEnt = nil
+            lp.DeathHideAccessories = nil
+        end
+    else
+        aliveSince = nil
+    end
+
+    if cv_static_debug:GetBool() and CurTime() > nextDebugPrint then
+        nextDebugPrint = CurTime() + 1
+        print(string.format("[DeathStatic] isDead=%s ownDeath=%.1f instant=%s active=%s level=%.2f ragdoll=%s authority=%s noise=%s sound=%s",
+            tostring(isDead), ownDeathStart > 0 and (CurTime() - ownDeathStart) or 0, tostring(IsInstantDeath()),
+            tostring(StaticDeathActive()), GetStaticLevel(), tostring(IsValid(ragdollEnt)), tostring(authorityTaken),
+            tostring(noiseReady and noiseMat ~= nil), tostring(IsValid(staticStation))))
+    end
+end)
+
+-- type  deathstatic_test  (or  deathstatic_test 1  for the instant version) to see/hear it for 10 seconds
+concommand.Add("deathstatic_test", function(_, _, args)
+    testStart = CurTime()
+    testUntil = CurTime() + 10
+    testInstant = args[1] == "1"
+end)
