@@ -86,6 +86,18 @@ function RenderAccessories(ply, accessories, setup)
 	local ent = IsValid(ply.FakeRagdoll) and ply.FakeRagdoll or ply
 	ent = IsValid(ply.OldRagdoll) and ply.OldRagdoll:IsRagdoll() and ply.OldRagdoll or ent
 
+	-- dead and looking out of your own corpse: your hats and glasses would be right in front of the camera
+	local owner = (ply:IsRagdoll() and hg.RagdollOwner(ply)) or ply
+	if owner == LocalPlayer() and LocalPlayer().DeathHideAccessories then
+		if ply.modelAccess then
+			for k, v in pairs(ply.modelAccess) do
+				if IsValid(v) then v:Remove() end
+				ply.modelAccess[k] = nil
+			end
+		end
+		return
+	end
+
 	islply = ((ply:IsRagdoll() and hg.RagdollOwner(ply)) or ply) == (LocalPlayer():Alive() and LocalPlayer() or LocalPlayer():GetNWEntity("spect",LocalPlayer())) and GetViewEntity() == (LocalPlayer():Alive() and LocalPlayer() or LocalPlayer():GetNWEntity("spect",LocalPlayer()))
 	
 	local fountains = GetNetVar("fountains") or {}
@@ -145,7 +157,7 @@ function DrawAccesories(ply, ent, accessories,accessData, islply, force, setup)
 
 		local model = ply.modelAccess[accessories]
 		model:SetNoDraw(true)
-		model:SetModelScale( accessData[fem and "fempos" or "malepos"][3] )
+		model:SetModelScale( (accessData[fem and "fempos" or "malepos"] or {})[3] or 1 )
 		model:SetSkin( isfunction(accessData["skin"]) and accessData["skin"](ent) or accessData["skin"] )
 		model:SetBodyGroups( accessData["bodygroups"] or "" )
 		model:SetParent(ent, ent:LookupBone(accessData["bone"]))

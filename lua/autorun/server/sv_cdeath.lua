@@ -94,6 +94,146 @@ timer.Create("DeathEffect_StuckSweep", 5, 0, function()
     end
 end)
 
+-- Headshot tracking: remember where the last hit landed so the client can cut straight to static.
+-- A hit counts when it was to the head and the player died within DEATH_HEADSHOT_WINDOW seconds of it.
+local DEATH_HEADSHOT_WINDOW = 8
+
+local function DeathEffect_FlagHeadshot(ply)
+    ply:SetNWBool("DeathEffect_Headshot", true)
+    ply:SetNWFloat("DeathEffect_HeadshotTime", CurTime())
+end
+
+hook.Add("HomigradDamage", "DeathEffect_TrackHeadHit", function(victim, dmgInfo, hitgroup)
+    local ply = victim
+    if IsValid(ply) and not ply:IsPlayer() then
+        -- ragdolled players take hits on their ragdoll
+        ply = hg and hg.RagdollOwner and hg.RagdollOwner(victim) or victim.ply
+    end
+    if not IsValid(ply) or not ply:IsPlayer() then return end
+
+    ply.DeathEffect_LastHit = {
+        head = hitgroup == HITGROUP_HEAD,
+        time = CurTime()
+    }
+
+    -- the killing shot can be reported after the death itself: flag it now
+    if hitgroup == HITGROUP_HEAD and not ply:Alive() then
+        DeathEffect_FlagHeadshot(ply)
+    end
+
+    -- A head hit that wrecks the brain (the game stops the heart at 0.6) is a headtap. Flag it the moment it
+    -- happens - the actual death only follows seconds later. (Bleeding and suffocation raise the brain damage
+    -- too, but never together with a head hit, so those deaths keep their normal fade.)
+    if hitgroup == HITGROUP_HEAD then
+        local function check()
+            local org = IsValid(ply) and ply.organism
+            if org and ((tonumber(org.brain) or 0) >= 0.6 or (tonumber(org.brainHemorrhage) or 0) >= 0.3) then
+                DeathEffect_FlagHeadshot(ply)
+            end
+        end
+        check()
+        timer.Simple(0.05, check)
+        timer.Simple(0.3, check)
+    end
+end)
+
+-- Explosions: a blown-off head or a body that bursts goes to instant static, the same as a headtap.
+-- hg.ExplodeHead / hg.FullBodyExplode are defined by the gamemode, so they are wrapped once they exist.
+local function DeathEffect_OwnerOf(ent)
+    if not IsValid(ent) then return nil end
+    if ent:IsPlayer() then return ent end
+    local org = ent.organism
+    if org and IsValid(org.owner) and org.owner:IsPlayer() then return org.owner end
+    local owner = hg and hg.RagdollOwner and hg.RagdollOwner(ent)
+    if IsValid(owner) and owner:IsPlayer() then return owner end
+    if IsValid(ent.ply) and ent.ply:IsPlayer() then return ent.ply end
+    return nil
+end
+
+local deathEffectWrapped = {}
+local function DeathEffect_WrapExplosions()
+    if not istable(hg) then return end
+
+    if isfunction(hg.ExplodeHead) and not deathEffectWrapped.head then
+        local original = hg.ExplodeHead
+        hg.ExplodeHead = function(ent, ...)
+            local owner = DeathEffect_OwnerOf(ent)
+            if IsValid(owner) then DeathEffect_FlagHeadshot(owner) end
+            return original(ent, ...)
+        end
+        deathEffectWrapped.head = true
+    end
+
+    if isfunction(hg.FullBodyExplode) and not deathEffectWrapped.body then
+        local original = hg.FullBodyExplode
+        hg.FullBodyExplode = function(target, ...)
+            local result = original(target, ...)
+            local owner = DeathEffect_OwnerOf(target)
+            -- only when it really burst (the function refuses some targets)
+            if IsValid(owner) and (target.fullbodyexploded or owner.fullbodyexploded) then
+                DeathEffect_FlagHeadshot(owner)
+            end
+            return result
+        end
+        deathEffectWrapped.body = true
+    end
+
+    if deathEffectWrapped.head and deathEffectWrapped.body then
+        timer.Remove("DeathEffect_WrapExplosions")
+    end
+end
+timer.Create("DeathEffect_WrapExplosions", 2, 0, DeathEffect_WrapExplosions)
+
+-- Environment deaths (a map's killbrick = trigger_hurt): the same instant black + static as a headtap.
+-- Only trigger_* inflictors count: the gamemode's own bleeding / suffocation damage also comes "from the world"
+-- and must keep the normal slow fade.
+hook.Add("EntityTakeDamage", "DeathEffect_TrackEnvironmentDamage", function(target, dmgInfo)
+    if not (IsValid(target) and target:IsPlayer()) then return end
+
+    local inflictor = dmgInfo:GetInflictor()
+    if not IsValid(inflictor) or not string.StartWith(inflictor:GetClass(), "trigger_") then return end
+
+    target.DeathEffect_EnvTime = CurTime()
+    -- a killbrick that hits for more than you have left: black right now
+    if dmgInfo:GetDamage() >= target:Health() then
+        DeathEffect_FlagHeadshot(target)
+    end
+end)
+
+local function DeathEffect_WasHeadshot(ply)
+    local last = ply.DeathEffect_LastHit
+    if last and last.head and (CurTime() - last.time) <= DEATH_HEADSHOT_WINDOW then return true end
+
+    -- the corpse of THIS death with its head blown off (ply.headexploded is not used: it can be left over from a
+    -- life before, and a brain-damage guess made every shot-then-bled-out death look like a headshot)
+    local ragdoll = ply:GetNWEntity("RagdollDeath")
+    if IsValid(ragdoll) and ragdoll.headexploded then return true end
+
+    -- killed by a killbrick a moment ago
+    if ply.DeathEffect_EnvTime and (CurTime() - ply.DeathEffect_EnvTime) <= 6 then return true end
+
+    return false
+end
+
+hook.Add("PlayerDeath", "DeathEffect_Headshot", function(ply)
+    local headshot = DeathEffect_WasHeadshot(ply)
+    -- (cleared again on spawn; never cleared here: the flag may already have been set by the head hit itself)
+    if headshot and not ply:GetNWBool("DeathEffect_Headshot", false) then
+        DeathEffect_FlagHeadshot(ply)
+    end
+
+    -- the damage code can finish its bookkeeping a moment after the death: look again
+    if not headshot then
+        for _, delay in ipairs({0, 0.2, 1}) do
+            timer.Simple(delay, function()
+                if IsValid(ply) and not ply:Alive() and not ply:GetNWBool("DeathEffect_Headshot", false) and DeathEffect_WasHeadshot(ply) then
+                    DeathEffect_FlagHeadshot(ply)
+                end
+            end)
+        end
+    end
+end)
+
 hook.Add("PlayerDeath", "DeathEffect_OnDeath", function(ply)
     if ply:IsBot() then
         ply:SetNWBool("DeathEffect_BlockRespawn", false)
@@ -140,6 +280,10 @@ end)
 
 hook.Add("PlayerSpawn", "DeathEffect_OnSpawn", function(ply)
     DeathEffect_ClearBlock(ply, true)
+    ply:SetNWBool("DeathEffect_Headshot", false)
+    ply:SetNWFloat("DeathEffect_HeadshotTime", 0)
+    ply.DeathEffect_LastHit = nil
+    ply.DeathEffect_EnvTime = nil
 end)
 
 hook.Add("PlayerDisconnected", "DeathEffect_Cleanup", function(ply)

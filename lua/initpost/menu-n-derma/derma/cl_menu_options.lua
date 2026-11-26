@@ -70,14 +70,7 @@ local SOUND_TYPEWRITER_LEVEL = 55
 local SOUND_TYPEWRITER_VOLUME = 0.25
 local SOUND_TYPEWRITER_PITCH = 102
 
-local function PlayTypewriterSound()
-    local ply = LocalPlayer and LocalPlayer()
-    if IsValid(ply) then
-        ply:EmitSound(SOUND_TYPEWRITER, SOUND_TYPEWRITER_LEVEL, SOUND_TYPEWRITER_PITCH, SOUND_TYPEWRITER_VOLUME)
-        return
-    end
-    surface.PlaySound(SOUND_TYPEWRITER)
-end
+local function PlayTypewriterSound() end
 
 local settings_header_height = 70
 
@@ -85,32 +78,32 @@ local function CreateSettingsFonts()
     local scale = math.min(ScrW(), ScrH()) / 1000
 
     surface.CreateFont("ZCity_Menu_Small", {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = ScreenScale(20),
         weight = 200,
     })
     surface.CreateFont("ZCity_Menu_Tiny", {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = ScreenScale(8),
         weight = 200,
     })
     surface.CreateFont("ZCity_Menu_Settings_Medium", {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = math.max(16, math.floor(32 * scale)),
         weight = 300,
     })
     surface.CreateFont("ZCity_Menu_Settings_Small", {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = math.max(14, math.floor(22 * scale)),
         weight = 300,
     })
     surface.CreateFont("ZCity_Menu_Settings_Tiny", {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = math.max(12, math.floor(16 * scale)),
         weight = 300,
     })
     surface.CreateFont("ZCity_Menu_Settings_Category", {
-        font = "Verily Serif Mono",
+        font = "Arial",
         size = ScreenScale(15),
         weight = 100
     })
@@ -125,6 +118,8 @@ hg.settings:AddOpt("Gameplay","hg_gary", "HG GARY")
 hg.settings:AddOpt("Gameplay","hg_deathfadeout", "Death fade out")
 hg.settings:AddOpt("Gameplay","hg_nojogging", "Disable jogging")
 hg.settings:AddOpt("Gameplay","deatheffect_death_screen", "Cinematic death screen")
+hg.settings:AddOpt("Gameplay","hg_death_static", "Death static")
+hg.settings:AddOpt("Gameplay","hg_death_static_volume", "Death static loudness (%)", false, false, "int")
 if not game.IsDedicated() then
 	hg.settings:AddOpt("Serverside gameplay","hg_toughnpcs", "Tough npcs")
 	hg.settings:AddOpt("Serverside gameplay","hg_thirdperson", "Thirdperson (WIP)")
@@ -296,24 +291,6 @@ local info_social_links = {
         subtitle = "In judgement. (Official Community Server)",
         url = DISCORD_URL or "https://discord.gg/Tgz7N58PzV",
         icon = Material("vgui/lapseinjudgement.png", "smooth")
-    },
-    {
-        title = "Z-CITY English Community Server",
-        subtitle = "Official community server for the Z-CITY repository. (ENG)",
-        url = "https://discord.gg/SjqRcv3yYY",
-        icon = Material("vgui/zcityeng.png", "smooth")
-    },
-    {
-        title = "Z-CITY Russian Community Server",
-        subtitle = "Official community server for the Z-CITY repository. (RUS)",
-        url = "https://discord.gg/475EmEdTgH",
-        icon = Material("vgui/zcityrus.png", "smooth")
-    },
-    {
-        title = "Community Hub (RENCHDEDSEX'S ZCITY SERVER)",
-        subtitle = "If you are looking for a more vanilla-ish BETTER alternative.",
-        url = "https://discord.gg/3UrJapj6kF",
-        icon = Material("vgui/communhub.png", "smooth")
     }
 }
 local info_social_icon_size = MenuUnit(24)
@@ -323,7 +300,7 @@ local info_social_button_w = MenuUnit(72)
 local info_social_button_h = MenuUnit(24)
 local info_social_button_right = MenuUnit(18)
 local info_judge_logo = Material("vgui/judgelogo.png", "noclamp smooth")
-local info_judge_url = "https://discord.gg/hsRfFdEDTH"
+local info_judge_url = "https://discord.gg/udJtKDqv4Q"
 local info_active_section = nil
 local info_section_buttons = {}
 local info_content_panel = nil
@@ -528,7 +505,7 @@ local function SettingsCreateCategoryButton(pParent, strTitle, categoryKey)
         end
 
         local elapsed = CurTime() - self.OpenTime
-        local charsToShow = math.floor(elapsed * 15)
+        local charsToShow = math.floor(elapsed * 1000)
         local isActive = (settings_active_category == self.CategoryKey)
         local targetText = isActive and ('[ '..strTitle..' ]') or strTitle
         local len = #targetText
@@ -558,7 +535,7 @@ local function SettingsCreateCategoryButton(pParent, strTitle, categoryKey)
         local textColor = self.RColor
         local outlineColor = Color(0, 0, 0, 255)
         if isHovered then
-            local v = flash * 255
+            local v = 175 + flash * 80
             textColor = Color(v, v, v, 255)
             local inv = 255 - v
             outlineColor = Color(inv, inv, inv, 255)
@@ -570,7 +547,7 @@ local function SettingsCreateCategoryButton(pParent, strTitle, categoryKey)
         matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
         matrix:Scale(Vector(scale, scale, 1))
         cam.PushModelMatrix(matrix)
-        draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+        draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         if self.LineLerp and self.LineLerp > 0.01 then
             surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
             surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -811,7 +788,7 @@ function SettingsRefreshContent()
 end
 
 function hg.DrawSettings(ParentPanel)
-    settings_sw, settings_sh = ScrW(), ScrH()
+    settings_sw, settings_sh = ParentPanel:GetWide(), ParentPanel:GetTall()
     isValidMainMenuPanel = IsValid(ParentPanel)
 
     ParentPanel:SetAlpha(0)
@@ -889,7 +866,7 @@ function hg.DrawSettings(ParentPanel)
     sidebarHeaderTitle.OpenTime = CurTime()
     function sidebarHeaderTitle:Think()
         local elapsed = CurTime() - (self.OpenTime or CurTime())
-        local charsToShow = math.floor(elapsed * 18)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = "SETTINGS"
         local len = #target
         if charsToShow > len then charsToShow = len end
@@ -920,6 +897,7 @@ function hg.DrawSettings(ParentPanel)
     end
 
     local backBtn = vgui.Create("DLabel", sidebar)
+    backBtn:SetVisible(not ParentPanel.IsDocked)
     backBtn:Dock(BOTTOM)
     backBtn:DockMargin(MenuUnit(15), MenuUnit(2), 0, MenuUnit(20))
     backBtn:SetFont("ZCity_Menu_Settings_Small")
@@ -967,7 +945,7 @@ function hg.DrawSettings(ParentPanel)
         self.HoverLerp = LerpFT(0.2, self.HoverLerp or 0, isHovered and 1 or 0)
         self.LineLerp = LerpFT(0.2, self.LineLerp or 0, isHovered and 1 or 0)
         local elapsed = CurTime() - self.OpenTime
-        local charsToShow = math.floor(elapsed * 15)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = "<- Return"
         local len = #target
         if charsToShow > len then charsToShow = len end
@@ -995,7 +973,7 @@ function hg.DrawSettings(ParentPanel)
         local textColor = settings_color_text
         local outlineColor = Color(0, 0, 0, 255)
         if isHovered then
-            local v = flash * 255
+            local v = 175 + flash * 80
             textColor = Color(v, v, v, 255)
             local inv = 255 - v
             outlineColor = Color(inv, inv, inv, 255)
@@ -1007,7 +985,7 @@ function hg.DrawSettings(ParentPanel)
         matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
         matrix:Scale(Vector(scale, scale, 1))
         cam.PushModelMatrix(matrix)
-        draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+        draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         if self.LineLerp and self.LineLerp > 0.01 then
             surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
             surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -1126,13 +1104,13 @@ local function KeybindsCreateSidebarButton(pParent, strTitle)
         local textColor = self.RColor
         local outlineColor = Color(0, 0, 0, 255)
         if isHovered then
-            local v = flash * 255
+            local v = 175 + flash * 80
             textColor = Color(v, v, v, 255)
             outlineColor = Color(255 - v, 255 - v, 255 - v, 255)
         end
         surface.SetFont(self:GetFont())
         local tw, th = surface.GetTextSize(self:GetText())
-        draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+        draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         if self.LineLerp and self.LineLerp > 0.01 then
             surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
             surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -1245,7 +1223,7 @@ function KeybindsRefreshContent()
 end
 
 function hg.DrawKeybinds(ParentPanel)
-    settings_sw, settings_sh = ScrW(), ScrH()
+    settings_sw, settings_sh = ParentPanel:GetWide(), ParentPanel:GetTall()
 
     ParentPanel:SetAlpha(0)
     ParentPanel.Paint = function(self, w, h)
@@ -1299,6 +1277,7 @@ function hg.DrawKeybinds(ParentPanel)
     headerHint:SizeToContents()
 
 	local backBtn = vgui.Create("DLabel", ParentPanel)
+    backBtn:SetVisible(not ParentPanel.IsDocked)
 	backBtn:SetPos(MenuUnit(15), settings_sh - MenuUnit(62))
 	backBtn:SetFont("ZCity_Menu_Settings_Small")
 	backBtn:SetTextColor(settings_color_text)
@@ -1341,7 +1320,7 @@ function hg.DrawKeybinds(ParentPanel)
 		self.HoverLerp = LerpFT(0.2, self.HoverLerp or 0, isHovered and 1 or 0)
 		self.LineLerp = LerpFT(0.2, self.LineLerp or 0, isHovered and 1 or 0)
 		local elapsed = CurTime() - self.OpenTime
-		local charsToShow = math.floor(elapsed * 15)
+		local charsToShow = math.floor(elapsed * 1000)
 		local target = "<- Return"
 		local len = #target
 		if charsToShow > len then charsToShow = len end
@@ -1369,7 +1348,7 @@ function hg.DrawKeybinds(ParentPanel)
 		local textColor = settings_color_text
 		local outlineColor = Color(0, 0, 0, 255)
 		if isHovered then
-			local v = flash * 255
+			local v = 175 + flash * 80
 			textColor = Color(v, v, v, 255)
 			local inv = 255 - v
 			outlineColor = Color(inv, inv, inv, 255)
@@ -1381,7 +1360,7 @@ function hg.DrawKeybinds(ParentPanel)
 		matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
 		matrix:Scale(Vector(scale, scale, 1))
 		cam.PushModelMatrix(matrix)
-		draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+		draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 		if self.LineLerp and self.LineLerp > 0.01 then
 			surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
 			surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -1461,7 +1440,7 @@ local function InfoCreateSectionButton(pParent, strTitle, sectionKey)
         )
 
         local elapsed = CurTime() - self.OpenTime
-        local charsToShow = math.floor(elapsed * 15)
+        local charsToShow = math.floor(elapsed * 1000)
         local isActive = not self.SectionDisabled and info_active_section == self.SectionKey
         local targetText = isActive and ("[ " .. strTitle .. " ]") or strTitle
         local len = #targetText
@@ -1491,7 +1470,7 @@ local function InfoCreateSectionButton(pParent, strTitle, sectionKey)
         local textColor = self.RColor
         local outlineColor = Color(0, 0, 0, 255)
         if isHovered then
-            local v = flash * 255
+            local v = 175 + flash * 80
             textColor = Color(v, v, v, 255)
             local inv = 255 - v
             outlineColor = Color(inv, inv, inv, 255)
@@ -1503,7 +1482,7 @@ local function InfoCreateSectionButton(pParent, strTitle, sectionKey)
         matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
         matrix:Scale(Vector(scale, scale, 1))
         cam.PushModelMatrix(matrix)
-        draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+        draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         if self.LineLerp and self.LineLerp > 0.01 then
             surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
             surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -2146,7 +2125,7 @@ function InfoRefreshContent()
 end
 
 function hg.DrawInformation(ParentPanel)
-    settings_sw, settings_sh = ScrW(), ScrH()
+    settings_sw, settings_sh = ParentPanel:GetWide(), ParentPanel:GetTall()
 
     ParentPanel:SetAlpha(0)
     ParentPanel.Paint = function(self, w, h)
@@ -2200,14 +2179,14 @@ function hg.DrawInformation(ParentPanel)
 
     local sidebarHeaderTitle = vgui.Create("DLabel", sidebarHeader)
     sidebarHeaderTitle:SetPos(MenuUnit(15), MenuUnit(18))
-    sidebarHeaderTitle:SetFont("ZCity_Menu_Small")
+    sidebarHeaderTitle:SetFont("ZCity_Menu_Settings_Small") -- the bigger font did not fit the docked sidebar
     sidebarHeaderTitle:SetTextColor(settings_color_whitey)
     sidebarHeaderTitle:SetText("INFORMATION")
     sidebarHeaderTitle:SizeToContents()
     sidebarHeaderTitle.OpenTime = CurTime()
     function sidebarHeaderTitle:Think()
         local elapsed = CurTime() - (self.OpenTime or CurTime())
-        local charsToShow = math.floor(elapsed * 18)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = "INFORMATION"
         local len = #target
         if charsToShow > len then charsToShow = len end
@@ -2235,6 +2214,7 @@ function hg.DrawInformation(ParentPanel)
     end
 
     local backBtn = vgui.Create("DLabel", sidebar)
+    backBtn:SetVisible(not ParentPanel.IsDocked)
     backBtn:Dock(BOTTOM)
     backBtn:DockMargin(MenuUnit(15), MenuUnit(2), 0, MenuUnit(20))
     backBtn:SetFont("ZCity_Menu_Settings_Small")
@@ -2281,7 +2261,7 @@ function hg.DrawInformation(ParentPanel)
         self.HoverLerp = LerpFT(0.2, self.HoverLerp or 0, isHovered and 1 or 0)
         self.LineLerp = LerpFT(0.2, self.LineLerp or 0, isHovered and 1 or 0)
         local elapsed = CurTime() - self.OpenTime
-        local charsToShow = math.floor(elapsed * 15)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = "<- Return"
         local len = #target
         if charsToShow > len then charsToShow = len end
@@ -2309,7 +2289,7 @@ function hg.DrawInformation(ParentPanel)
         local textColor = settings_color_text
         local outlineColor = Color(0, 0, 0, 255)
         if isHovered then
-            local v = flash * 255
+            local v = 175 + flash * 80
             textColor = Color(v, v, v, 255)
             local inv = 255 - v
             outlineColor = Color(inv, inv, inv, 255)
@@ -2321,7 +2301,7 @@ function hg.DrawInformation(ParentPanel)
         matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
         matrix:Scale(Vector(scale, scale, 1))
         cam.PushModelMatrix(matrix)
-        draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+        draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         if self.LineLerp and self.LineLerp > 0.01 then
             surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
             surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -2346,7 +2326,8 @@ function hg.DrawInformation(ParentPanel)
 
     local header = vgui.Create("DPanel", mainPanel)
     header:Dock(TOP)
-    header:SetTall(MenuUnit(settings_header_height))
+    header:SetTall(0)
+    header:SetVisible(false) -- the "what section am I in" bar is gone; the labels below are only kept so the code that updates them still works
     header.Paint = function(self, w, h)
         draw.RoundedBox(0, 0, 0, w, h, Color(15, 15, 20, 120))
         surface.SetDrawColor(settings_color_whitey.r, settings_color_whitey.g, settings_color_whitey.b, 140)

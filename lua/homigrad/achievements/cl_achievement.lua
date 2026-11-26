@@ -16,7 +16,7 @@ local function MenuUnit(num)
 end
 
 local function AchievementFontName()
-    return "Verily Serif Mono"
+    return "Arial"
 end
 
 local function CreateAchievementFonts()
@@ -58,14 +58,7 @@ local SOUND_TYPEWRITER_LEVEL = 55
 local SOUND_TYPEWRITER_VOLUME = 0.25
 local SOUND_TYPEWRITER_PITCH = 102
 
-local function PlayTypewriterSound()
-    local ply = LocalPlayer and LocalPlayer()
-    if IsValid(ply) then
-        ply:EmitSound(SOUND_TYPEWRITER, SOUND_TYPEWRITER_LEVEL, SOUND_TYPEWRITER_PITCH, SOUND_TYPEWRITER_VOLUME)
-        return
-    end
-    surface.PlaySound(SOUND_TYPEWRITER)
-end
+local function PlayTypewriterSound() end
 
 local achievement_header_height = 70
 local achievement_color_white = Color(255,255,255,240)
@@ -141,6 +134,7 @@ end
 
 local function AchievementCreateReturnButton(sidebar, ParentPanel)
     local backBtn = vgui.Create("DLabel", sidebar)
+    backBtn:SetVisible(not ParentPanel.IsDocked)
     backBtn:Dock(BOTTOM)
     backBtn:DockMargin(MenuUnit(15), MenuUnit(2), 0, MenuUnit(20))
     backBtn:SetFont("ZCity_Ach_Small")
@@ -197,7 +191,7 @@ local function AchievementCreateReturnButton(sidebar, ParentPanel)
             MenuUnit(20)
         )
         local elapsed = CurTime() - self.OpenTime
-        local charsToShow = math.floor(elapsed * 15)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = "<- Return"
         local len = #target
         if charsToShow > len then charsToShow = len end
@@ -229,7 +223,7 @@ local function AchievementCreateReturnButton(sidebar, ParentPanel)
         local textColor = achievement_color_text
         local outlineColor = Color(0, 0, 0, 255)
         if isHovered then
-            local v = flash * 255
+            local v = 175 + flash * 80
             textColor = Color(v, v, v, 255)
             local inv = 255 - v
             outlineColor = Color(inv, inv, inv, 255)
@@ -241,7 +235,7 @@ local function AchievementCreateReturnButton(sidebar, ParentPanel)
         matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
         matrix:Scale(Vector(scale, scale, 1))
         cam.PushModelMatrix(matrix)
-        draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+        draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         if self.LineLerp and self.LineLerp > 0.01 then
             surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
             surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -255,6 +249,7 @@ end
 
 local function AchievementCreateHeaderReturnButton(parent, ParentPanel)
     local backBtn = vgui.Create("DLabel", parent)
+    backBtn:SetVisible(not ParentPanel.IsDocked)
     backBtn:SetFont("ZCity_Ach_Small")
     backBtn:SetTextColor(achievement_color_text)
     backBtn:SetText(string.rep("#", #"<- Return"))
@@ -301,7 +296,7 @@ local function AchievementCreateHeaderReturnButton(parent, ParentPanel)
         self.HoverLerp = LerpFT(0.2, self.HoverLerp or 0, isHovered and 1 or 0)
         self.LineLerp = LerpFT(0.2, self.LineLerp or 0, isHovered and 1 or 0)
         local elapsed = CurTime() - self.OpenTime
-        local charsToShow = math.floor(elapsed * 15)
+        local charsToShow = math.floor(elapsed * 1000)
         local target = "<- Return"
         local len = #target
         if charsToShow > len then charsToShow = len end
@@ -333,7 +328,7 @@ local function AchievementCreateHeaderReturnButton(parent, ParentPanel)
         local textColor = achievement_color_text
         local outlineColor = Color(0, 0, 0, 255)
         if isHovered then
-            local v = flash * 255
+            local v = 175 + flash * 80
             textColor = Color(v, v, v, 255)
             local inv = 255 - v
             outlineColor = Color(inv, inv, inv, 255)
@@ -345,7 +340,7 @@ local function AchievementCreateHeaderReturnButton(parent, ParentPanel)
         matrix:Translate(Vector(0, h * (1 - scale) * 0.5, 0))
         matrix:Scale(Vector(scale, scale, 1))
         cam.PushModelMatrix(matrix)
-        draw.SimpleTextOutlined(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, outlineColor)
+        draw.SimpleText(self:GetText(), self:GetFont(), 0, h / 2, textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         if self.LineLerp and self.LineLerp > 0.01 then
             surface.SetDrawColor(255, 255, 255, 255 * self.LineLerp)
             surface.DrawRect(0, h / 2 + th / 2, tw * self.LineLerp, math.max(1, MenuUnit(1)))
@@ -422,7 +417,7 @@ function hg.DrawAchievmentsMenu(ParentPanel)
     hg.achievements.MenuPanel = root
 
     local mainPanel = vgui.Create("DPanel", root)
-    mainPanel:SetSize(ScrW(), ScrH())
+    mainPanel:SetSize(ParentPanel:GetWide(), ParentPanel:GetTall())
     mainPanel:SetPos(0, 0)
     mainPanel.TargetX = 0
     mainPanel.Think = function(self)
@@ -680,7 +675,7 @@ function hg.DrawAchievmentsMenu(ParentPanel)
     body.PerformLayout = function(self, w, h)
         local gap = MenuUnit(14)
         local minDetailW = MenuUnit(320)
-        local listW = math.max(MenuUnit(430), math.floor(ScrW() * 0.5))
+        local listW = math.max(MenuUnit(430), math.floor(ParentPanel:GetWide() * 0.5))
         listW = math.min(listW, math.max(MenuUnit(260), w - minDetailW - gap))
         local detailW = math.max(minDetailW, w - listW - gap)
 
