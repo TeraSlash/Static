@@ -719,9 +719,9 @@ hook.Add("RenderScene", "CinematicDeathRenderScene", CinematicDeathRenderScene)
 -- Every death looks like the reference video:
 --   0.0 - 1.0s   you look out of the body, the colour drains to grey
 --   0.8 - 1.2s   the edges close in and the picture goes black
---   1.2 - 1.6s   pure black
---   1.6s on      the static fades in out of the black (2s) - and a noise fades in with it
--- Headshot / explosion / killbrick (flagged by sv_cdeath.lua): BLACK AT ONCE, then the static fades in.
+--   1.2 - 2.7s   pure black
+--   2.7s on      the static fades in out of the black (4s) - and a noise fades in with it
+-- Headshot / explosion / killbrick (flagged by sv_cdeath.lua): BLACK AT ONCE, 1s of black, then the static fades in.
 -- Console: deathstatic_test (normal death) / deathstatic_test 1 (instant death) previews it for 10 seconds,
 --          deathstatic_debug 1 prints the state once per second.
 -- Settings > Gameplay: "Death static" (on/off: off = only the camera in the body) and "Death static loudness (%)".
@@ -729,8 +729,9 @@ hook.Add("RenderScene", "CinematicDeathRenderScene", CinematicDeathRenderScene)
 local DEATH_GREY_TIME   = 1.0   -- seconds for the colour to drain completely
 local DEATH_DARK_START  = 0.8   -- when the picture starts to close in
 local DEATH_DARK_TIME   = 0.4   -- how long it takes to go fully black
-local DEATH_BLACK_HOLD  = 0.4   -- seconds of pure black before the static starts
-local STATIC_FADE_TIME  = 2.0   -- seconds the static takes to fade in out of the black
+local DEATH_BLACK_HOLD  = 1.5   -- seconds of pure black before the static starts
+local INSTANT_BLACK_HOLD = 1.0  -- the same for headshot / explosion / killbrick (black at once, then this long before the static)
+local STATIC_FADE_TIME  = 4.0   -- seconds the static takes to fade in out of the black
 local STATIC_MIN_VOLUME = 0.0   -- loudness when the static first starts
 local STATIC_MAX_VOLUME = 1.0   -- loudness at full static (before the slider)
 
@@ -826,7 +827,7 @@ end
 local function GetStaticLevel()
     if IsInstantDeath() then
         local since = (testUntil > CurTime()) and (CurTime() - testStart) or (CurTime() - instantStart)
-        return Smooth(since / STATIC_FADE_TIME)
+        return Smooth((since - INSTANT_BLACK_HOLD) / STATIC_FADE_TIME)
     end
     local staticStartsAt = DEATH_DARK_START + DEATH_DARK_TIME + DEATH_BLACK_HOLD
     return Smooth((DeathClock() - staticStartsAt) / STATIC_FADE_TIME)
